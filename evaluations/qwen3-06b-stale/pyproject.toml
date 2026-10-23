@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stale-qwen-eval"
+version = "0.1.0"
+description = "Reproducible Qwen3-0.6B pilot evaluation on STALE"
+requires-python = ">=3.10"
+dependencies = [
+  "datasets>=3.0,<5",
+  "transformers>=4.51,<5",
+]
+
+[project.scripts]
+stale-qwen-eval = "stale_qwen_eval.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
