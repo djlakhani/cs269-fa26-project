@@ -12,6 +12,21 @@ class EvidenceTooLongError(ValueError):
     """Raised when the mandatory evidence sessions cannot fit the input budget."""
 
 
+def _json_timestamp(value: Any) -> str | None:
+    """Convert dataset timestamp scalars to the stable string stored in artifacts."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return str(isoformat())
+    raise TypeError(
+        f"Unsupported timestamp value {value!r} ({type(value).__name__}); "
+        "expected a string or an object with isoformat()"
+    )
+
+
 def _indexed_sessions(item: Mapping[str, Any]) -> list[dict[str, Any]]:
     raw_sessions = item.get("haystack_session")
     if not isinstance(raw_sessions, list) or not raw_sessions:
@@ -25,7 +40,7 @@ def _indexed_sessions(item: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [
         {
             "original_index": index,
-            "timestamp": timestamps[index] if timestamps else None,
+            "timestamp": _json_timestamp(timestamps[index]) if timestamps else None,
             "messages": session,
         }
         for index, session in enumerate(raw_sessions)

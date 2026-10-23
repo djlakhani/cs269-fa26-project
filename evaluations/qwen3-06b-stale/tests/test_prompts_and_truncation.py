@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import unittest
+from datetime import datetime, timezone
 
 from stale_qwen_eval.prompts import (
     EXPLICIT_SYSTEM_PROMPT,
@@ -80,6 +82,24 @@ class PromptAndTruncationTests(unittest.TestCase):
         self.assertEqual(
             first["distractor_removal_order"], second["distractor_removal_order"]
         )
+
+    def test_datetime_timestamps_are_normalized_for_json(self) -> None:
+        record = make_record("scenario-datetime", "T1")
+        record["timestamps"] = [
+            datetime(2025, 1, index + 1, 12, 0, tzinfo=timezone.utc)
+            for index in range(len(record["haystack_session"]))
+        ]
+        prepared = truncate_scenario(
+            record,
+            FakeTokenizer(),
+            input_token_limit=10_000,
+            seed=42,
+        )
+        self.assertEqual(
+            prepared["sessions"][0]["timestamp"],
+            "2025-01-01T12:00:00+00:00",
+        )
+        json.dumps(prepared)
 
     def test_mandatory_evidence_overflow_fails(self) -> None:
         with self.assertRaisesRegex(EvidenceTooLongError, "mandatory evidence"):
