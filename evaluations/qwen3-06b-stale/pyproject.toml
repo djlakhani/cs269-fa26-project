@@ -4,12 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stale-qwen-eval"
-version = "0.1.0"
-description = "Reproducible Qwen3-0.6B pilot evaluation on STALE"
-requires-python = ">=3.10"
+version = "0.2.0"
+description = "Reproducible paired-context Qwen3-0.6B evaluation on STALE"
+requires-python = ">=3.12,<3.13"
 dependencies = [
-  "datasets>=3.0,<5",
-  "transformers>=4.51,<5",
+  "datasets==4.4.1",
+  "jinja2==3.1.6",
+  "torch==2.9.1; sys_platform == 'linux'",
+  "tqdm==4.67.1",
+  "transformers==4.57.3",
 ]
 
 [project.scripts]
@@ -17,4 +20,14 @@ stale-qwen-eval = "stale_qwen_eval.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 

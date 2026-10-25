@@ -7,7 +7,11 @@ from tempfile import TemporaryDirectory
 
 from stale_qwen_eval.constants import DIMENSION_KEYS
 from stale_qwen_eval.persistence import ArtifactPaths, write_response_checkpoint
-from stale_qwen_eval.reporting import refresh_manual_scores, summarize_manual_scores
+from stale_qwen_eval.reporting import (
+    refresh_manual_scores,
+    summarize_context_comparison,
+    summarize_manual_scores,
+)
 
 
 def artifact_with_one_scenario() -> dict:
@@ -23,9 +27,35 @@ def artifact_with_one_scenario() -> dict:
 
 
 class ReportingTests(unittest.TestCase):
+    @staticmethod
+    def _complete_view(
+        paths: ArtifactPaths,
+        artifact: dict,
+        scores: tuple[str, str, str],
+    ) -> dict:
+        refresh_manual_scores(paths, artifact)
+        with paths.manual_scores.open("r", encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        for row, score in zip(rows, scores, strict=True):
+            row["score"] = score
+        with paths.manual_scores.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=rows[0].keys())
+            writer.writeheader()
+            writer.writerows(rows)
+        for dimension_key in DIMENSION_KEYS:
+            write_response_checkpoint(
+                paths,
+                {
+                    "uid": "one",
+                    "dimension_key": dimension_key,
+                    "status": "ok",
+                },
+            )
+        return summarize_manual_scores(paths, artifact)
+
     def test_manual_scores_are_preserved_and_summarized(self) -> None:
         with TemporaryDirectory() as temporary_directory:
-            paths = ArtifactPaths(Path(temporary_directory))
+            paths = ArtifactPaths(Path(temporary_directory), "truncated")
             artifact = artifact_with_one_scenario()
             refresh_manual_scores(paths, artifact)
 
@@ -67,11 +97,43 @@ class ReportingTests(unittest.TestCase):
 
     def test_incomplete_scores_do_not_emit_metrics(self) -> None:
         with TemporaryDirectory() as temporary_directory:
-            paths = ArtifactPaths(Path(temporary_directory))
+            paths = ArtifactPaths(Path(temporary_directory), "evidence_only")
             artifact = artifact_with_one_scenario()
             refresh_manual_scores(paths, artifact)
             summary = summarize_manual_scores(paths, artifact)
             self.assertFalse(summary["complete"])
             self.assertNotIn("metrics", summary)
             self.assertEqual(len(summary["missing"]), 3)
+
+    def test_context_comparison_reports_paired_changes(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            artifact = artifact_with_one_scenario()
+            summaries = {
+                "truncated": self._complete_view(
+                    ArtifactPaths(root, "truncated"), artifact, ("pass", "fail", "pass")
+                ),
+                "evidence_only": self._complete_view(
+                    ArtifactPaths(root, "evidence_only"), artifact, ("pass", "pass", "fail")
+                ),
+            }
+
+            comparison = summarize_context_comparison(root, artifact, summaries)
+
+            self.assertTrue(comparison["complete"])
+            self.assertEqual(comparison["paired_outcomes"]["both_pass"], 1)
+            self.assertEqual(
+                comparison["paired_outcomes"]["improved_without_distractors"], 1
+            )
+            self.assertEqual(
+                comparison["paired_outcomes"]["regressed_without_distractors"], 1
+            )
+            self.assertEqual(
+                comparison["metrics"]["overall"][
+                    "delta_evidence_only_minus_truncated"
+                ],
+                0.0,
+            )
+            self.assertTrue((root / "comparison_summary.json").exists())
+            self.assertTrue((root / "comparison_summary.md").exists())
 

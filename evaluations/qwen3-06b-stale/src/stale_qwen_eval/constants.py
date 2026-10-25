@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-PACKAGE_VERSION = "0.1.0"
-SCENARIO_SCHEMA_VERSION = 1
-RESPONSE_SCHEMA_VERSION = 1
-MANIFEST_SCHEMA_VERSION = 1
+PACKAGE_VERSION = "0.2.0"
+SCENARIO_SCHEMA_VERSION = 2
+RESPONSE_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 2
 PROMPT_VERSION = "stale-author-prompts-v1"
 
 DATASET_ID = "STALEproj/STALE"
@@ -12,10 +12,19 @@ MODEL_ID = "Qwen/Qwen3-0.6B"
 MODEL_REVISION = "167b8104f88905a951069f5f95f9776908da5f68"
 
 DEFAULT_SEED = 42
-DEFAULT_SAMPLES_PER_TYPE = 5
+DEFAULT_SAMPLES_PER_TYPE = 25
 DEFAULT_CONTEXT_WINDOW = 32_768
 DEFAULT_MAX_NEW_TOKENS = 512
 DEFAULT_INPUT_TOKEN_LIMIT = DEFAULT_CONTEXT_WINDOW - DEFAULT_MAX_NEW_TOKENS
+
+DEFAULT_CONTEXT_VIEW = "truncated"
+CONTEXT_VIEWS = {
+    "truncated": "Truncated history with retained distractor sessions",
+    "evidence_only": "Only the two relevant evidence sessions",
+}
+
+DEFAULT_ATTENTION_BACKEND = "flash_sdpa"
+ATTENTION_BACKENDS = ("flash_sdpa", "sdpa")
 
 TYPE_INFO = {
     "T1": "Co-referential conflict",

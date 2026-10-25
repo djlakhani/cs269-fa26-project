@@ -16,8 +16,8 @@ class PreparationTests(unittest.TestCase):
             atomic_write_json(
                 scenario_path,
                 {
-                    "schema_version": 1,
-                    "sampling": {"seed": 42, "samples_per_type": 5},
+                    "schema_version": 2,
+                    "sampling": {"seed": 42, "samples_per_type": 25},
                     "token_budget": {
                         "context_window": 32_768,
                         "max_new_tokens": 512,

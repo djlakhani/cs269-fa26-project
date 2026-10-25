@@ -12,38 +12,51 @@ from .io_utils import atomic_write_json, atomic_write_text, read_jsonl
 @dataclass(frozen=True)
 class ArtifactPaths:
     root: Path
+    view: str
 
     @property
     def scenarios(self) -> Path:
         return self.root / "scenarios.json"
 
     @property
+    def preparation_manifest(self) -> Path:
+        return self.root / "preparation_manifest.json"
+
+    @property
+    def run_metadata(self) -> Path:
+        return self.root / "run_metadata.json"
+
+    @property
+    def view_root(self) -> Path:
+        return self.root / "views" / self.view
+
+    @property
     def manifest(self) -> Path:
-        return self.root / "manifest.json"
+        return self.view_root / "manifest.json"
 
     @property
     def checkpoints(self) -> Path:
-        return self.root / "checkpoints"
+        return self.view_root / "checkpoints"
 
     @property
     def responses(self) -> Path:
-        return self.root / "responses.jsonl"
+        return self.view_root / "responses.jsonl"
 
     @property
     def report(self) -> Path:
-        return self.root / "results.md"
+        return self.view_root / "results.md"
 
     @property
     def manual_scores(self) -> Path:
-        return self.root / "manual_scores.csv"
+        return self.view_root / "manual_scores.csv"
 
     @property
     def summary(self) -> Path:
-        return self.root / "summary.json"
+        return self.view_root / "summary.json"
 
     @property
     def summary_markdown(self) -> Path:
-        return self.root / "summary.md"
+        return self.view_root / "summary.md"
 
 
 def response_key(record: dict[str, Any]) -> tuple[str, str]:

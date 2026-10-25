@@ -8,12 +8,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .constants import DIMENSION_INFO, DIMENSION_KEYS, TYPE_INFO
+from .constants import CONTEXT_VIEWS, DIMENSION_INFO, DIMENSION_KEYS, TYPE_INFO
 from .io_utils import atomic_write_json, atomic_write_text, load_json, utc_now
 from .persistence import ArtifactPaths, load_response_map
 
 
 SCORE_FIELDS = [
+    "context_view",
     "uid",
     "type",
     "type_name",
@@ -68,6 +69,7 @@ def refresh_manual_scores(paths: ArtifactPaths, artifact: dict[str, Any]) -> Non
             writer.writerow(
                 {
                     "uid": scenario["uid"],
+                    "context_view": paths.view,
                     "type": scenario["type"],
                     "type_name": TYPE_INFO[scenario["type"]],
                     "dimension": dimension_key,
@@ -79,12 +81,17 @@ def refresh_manual_scores(paths: ArtifactPaths, artifact: dict[str, Any]) -> Non
     atomic_write_text(paths.manual_scores, output.getvalue())
 
 
-def build_report(artifact: dict[str, Any], responses: dict[tuple[str, str], dict[str, Any]]) -> str:
+def build_report(
+    artifact: dict[str, Any],
+    responses: dict[tuple[str, str], dict[str, Any]],
+    context_view: str,
+) -> str:
     meta = artifact
     type_counts = Counter(str(scenario["type"]) for scenario in meta["data"])
     lines = [
-        "# Qwen3-0.6B on the STALE pilot",
+        "# Qwen3-0.6B on STALE",
         "",
+        f"- Context view: `{context_view}` — {CONTEXT_VIEWS[context_view]}",
         (
             f"- Scenarios: {len(meta['data'])} "
             f"({type_counts.get('T1', 0)} Type I, {type_counts.get('T2', 0)} Type II)"
@@ -99,12 +106,13 @@ def build_report(artifact: dict[str, Any], responses: dict[tuple[str, str], dict
         "",
     ]
     for scenario_number, scenario in enumerate(meta["data"], start=1):
+        view = scenario["views"][context_view]
         lines.extend(
             [
                 f"## {scenario_number}. {scenario['type']} — {scenario['type_name']}",
                 "",
                 f"UID: `{scenario['uid']}`  ",
-                f"Sessions retained: {len(scenario['kept_session_indices'])}/{scenario['source_session_count']}  ",
+                f"Sessions retained: {len(view['kept_session_indices'])}/{scenario['source_session_count']}  ",
                 f"Evidence sessions: {', '.join(str(index + 1) for index in scenario['relevant_session_index'])}",
                 "",
             ]
@@ -156,7 +164,7 @@ def build_report(artifact: dict[str, Any], responses: dict[tuple[str, str], dict
 
 def refresh_report(paths: ArtifactPaths, artifact: dict[str, Any]) -> None:
     responses = load_response_map(paths)
-    atomic_write_text(paths.report, build_report(artifact, responses))
+    atomic_write_text(paths.report, build_report(artifact, responses, paths.view))
     refresh_manual_scores(paths, artifact)
 
 
@@ -246,6 +254,95 @@ def summarize_manual_scores(paths: ArtifactPaths, artifact: dict[str, Any]) -> d
             )
     atomic_write_text(paths.summary_markdown, "\n".join(lines) + "\n")
     return result
+
+
+def summarize_context_comparison(
+    artifact_root: Path,
+    artifact: dict[str, Any],
+    summaries: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Write paired accuracy deltas after both context views are fully scored."""
+    output: dict[str, Any] = {
+        "generated_at": utc_now(),
+        "complete": all(summary.get("complete") for summary in summaries.values()),
+        "views": list(CONTEXT_VIEWS),
+    }
+    comparison_json = artifact_root / "comparison_summary.json"
+    comparison_markdown = artifact_root / "comparison_summary.md"
+    if not output["complete"]:
+        output["message"] = "Complete both views' responses and manual scores first."
+        atomic_write_json(comparison_json, output)
+        atomic_write_text(
+            comparison_markdown,
+            "# Context-view comparison\n\n"
+            "Incomplete: generate and manually score every response in both views.\n",
+        )
+        return output
+
+    metrics: dict[str, dict[str, Any]] = {}
+    for group in summaries["truncated"]["metrics"]:
+        truncated = summaries["truncated"]["metrics"][group]
+        evidence = summaries["evidence_only"]["metrics"][group]
+        metrics[group] = {
+            "truncated_accuracy": truncated["accuracy"],
+            "evidence_only_accuracy": evidence["accuracy"],
+            "delta_evidence_only_minus_truncated": (
+                evidence["accuracy"] - truncated["accuracy"]
+            ),
+            "total": truncated["total"],
+        }
+
+    score_maps = {
+        view: _load_existing_scores(ArtifactPaths(artifact_root, view).manual_scores)
+        for view in CONTEXT_VIEWS
+    }
+    paired_counts = Counter(
+        {
+            "both_pass": 0,
+            "both_fail": 0,
+            "improved_without_distractors": 0,
+            "regressed_without_distractors": 0,
+        }
+    )
+    for scenario in artifact["data"]:
+        for dimension_key in DIMENSION_KEYS:
+            key = (str(scenario["uid"]), dimension_key)
+            truncated_score = _normalized_score(score_maps["truncated"][key]["score"])
+            evidence_score = _normalized_score(score_maps["evidence_only"][key]["score"])
+            pair = (bool(truncated_score), bool(evidence_score))
+            paired_counts[
+                {
+                    (True, True): "both_pass",
+                    (False, False): "both_fail",
+                    (False, True): "improved_without_distractors",
+                    (True, False): "regressed_without_distractors",
+                }[pair]
+            ] += 1
+
+    output["metrics"] = metrics
+    output["paired_outcomes"] = dict(sorted(paired_counts.items()))
+    atomic_write_json(comparison_json, output)
+
+    lines = [
+        "# Context-view comparison",
+        "",
+        "Positive deltas mean evidence-only context scored higher.",
+        "",
+        "| Group | Truncated | Evidence only | Delta (pp) | N |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for group, metric in metrics.items():
+        lines.append(
+            f"| {group} | {100 * metric['truncated_accuracy']:.1f}% | "
+            f"{100 * metric['evidence_only_accuracy']:.1f}% | "
+            f"{100 * metric['delta_evidence_only_minus_truncated']:+.1f} | "
+            f"{metric['total']} |"
+        )
+    lines.extend(["", "## Paired probe outcomes", ""])
+    for name, count in sorted(paired_counts.items()):
+        lines.append(f"- {name}: {count}")
+    atomic_write_text(comparison_markdown, "\n".join(lines) + "\n")
+    return output
 
 
 def load_artifact(paths: ArtifactPaths) -> dict[str, Any]:

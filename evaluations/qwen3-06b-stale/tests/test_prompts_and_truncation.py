@@ -11,7 +11,11 @@ from stale_qwen_eval.prompts import (
     count_prompt_tokens,
     format_haystack,
 )
-from stale_qwen_eval.truncation import EvidenceTooLongError, truncate_scenario
+from stale_qwen_eval.truncation import (
+    EvidenceTooLongError,
+    evidence_only_view,
+    truncate_scenario,
+)
 
 from conftest import FakeTokenizer, make_record
 
@@ -109,4 +113,13 @@ class PromptAndTruncationTests(unittest.TestCase):
                 input_token_limit=10,
                 seed=42,
             )
+
+    def test_evidence_only_contains_exactly_the_two_relevant_sessions(self) -> None:
+        record = make_record("scenario-evidence", "T2")
+        view = evidence_only_view(record, FakeTokenizer(), input_token_limit=10_000)
+        self.assertEqual(view["kept_session_indices"], [2, 5])
+        self.assertEqual(
+            [session["original_index"] for session in view["sessions"]], [2, 5]
+        )
+        self.assertEqual(len(view["dropped_session_indices"]), 6)
 

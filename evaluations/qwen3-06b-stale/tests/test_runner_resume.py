@@ -51,7 +51,7 @@ def make_artifact() -> dict[str, Any]:
         for index, session in enumerate(raw["haystack_session"])
     ]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "dataset": {"id": DATASET_ID, "revision": DATASET_REVISION, "split": "train"},
         "model_tokenizer": {"id": MODEL_ID, "revision": MODEL_REVISION},
         "prompt_version": PROMPT_VERSION,
@@ -72,32 +72,92 @@ def make_artifact() -> dict[str, Any]:
                 "probing_queries": raw["probing_queries"],
                 "relevant_session_index": raw["relevant_session_index"],
                 "source_session_count": len(sessions),
-                "kept_session_indices": list(range(len(sessions))),
-                "dropped_session_indices": [],
-                "distractor_removal_order": [],
-                "sessions": sessions,
-                "input_token_counts": {key: 50 for key in DIMENSION_KEYS},
+                "views": {
+                    "truncated": {
+                        "kept_session_indices": list(range(len(sessions))),
+                        "dropped_session_indices": [],
+                        "distractor_removal_order": [],
+                        "sessions": sessions,
+                        "input_token_counts": {key: 50 for key in DIMENSION_KEYS},
+                    },
+                    "evidence_only": {
+                        "kept_session_indices": raw["relevant_session_index"],
+                        "dropped_session_indices": [0, 1, 3, 4],
+                        "sessions": [sessions[2], sessions[5]],
+                        "input_token_counts": {key: 50 for key in DIMENSION_KEYS},
+                    },
+                },
             }
         ],
     }
 
 
 class RunnerResumeTests(unittest.TestCase):
+    def test_smoke_completes_one_scenario_in_each_view_independently(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            atomic_write_json(ArtifactPaths(root, "truncated").scenarios, make_artifact())
+
+            truncated_backend = FakeBackend(50)
+            generated = run_evaluation(
+                root,
+                context_view="truncated",
+                resume=True,
+                max_scenarios=1,
+                show_progress=False,
+                backend=truncated_backend,
+            )
+            self.assertEqual(generated, len(DIMENSION_KEYS))
+            self.assertEqual(truncated_backend.calls, len(DIMENSION_KEYS))
+
+            evidence_backend = FakeBackend(50)
+            generated = run_evaluation(
+                root,
+                context_view="evidence_only",
+                resume=True,
+                max_scenarios=1,
+                show_progress=False,
+                backend=evidence_backend,
+            )
+            self.assertEqual(generated, len(DIMENSION_KEYS))
+            self.assertEqual(evidence_backend.calls, len(DIMENSION_KEYS))
+            self.assertEqual(
+                len(load_response_map(ArtifactPaths(root, "truncated"))), 3
+            )
+            self.assertEqual(
+                len(load_response_map(ArtifactPaths(root, "evidence_only"))), 3
+            )
+
     def test_interrupted_run_resumes_without_duplicates(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            paths = ArtifactPaths(root)
+            paths = ArtifactPaths(root, "truncated")
             atomic_write_json(paths.scenarios, make_artifact())
 
             first_backend = FakeBackend(50)
             self.assertEqual(
-                run_evaluation(root, resume=True, max_queries=2, backend=first_backend), 2
+                run_evaluation(
+                    root,
+                    context_view="truncated",
+                    resume=True,
+                    max_queries=2,
+                    show_progress=False,
+                    backend=first_backend,
+                ),
+                2,
             )
             self.assertEqual(first_backend.calls, 2)
 
             second_backend = FakeBackend(50)
             self.assertEqual(
-                run_evaluation(root, resume=True, backend=second_backend), 1
+                run_evaluation(
+                    root,
+                    context_view="truncated",
+                    resume=True,
+                    show_progress=False,
+                    backend=second_backend,
+                ),
+                1,
             )
             self.assertEqual(second_backend.calls, 1)
 
@@ -112,24 +172,50 @@ class RunnerResumeTests(unittest.TestCase):
     def test_existing_responses_require_resume(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            paths = ArtifactPaths(root)
+            paths = ArtifactPaths(root, "truncated")
             atomic_write_json(paths.scenarios, make_artifact())
-            run_evaluation(root, resume=True, max_queries=1, backend=FakeBackend(50))
+            run_evaluation(
+                root,
+                context_view="truncated",
+                resume=True,
+                max_queries=1,
+                show_progress=False,
+                backend=FakeBackend(50),
+            )
             with self.assertRaisesRegex(ValueError, "--resume"):
-                run_evaluation(root, resume=False, backend=FakeBackend(50))
+                run_evaluation(
+                    root,
+                    context_view="truncated",
+                    resume=False,
+                    show_progress=False,
+                    backend=FakeBackend(50),
+                )
 
     def test_manifest_detects_scenario_changes_before_generation(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            paths = ArtifactPaths(root)
+            paths = ArtifactPaths(root, "truncated")
             artifact = make_artifact()
             atomic_write_json(paths.scenarios, artifact)
-            run_evaluation(root, resume=True, max_queries=1, backend=FakeBackend(50))
+            run_evaluation(
+                root,
+                context_view="truncated",
+                resume=True,
+                max_queries=1,
+                show_progress=False,
+                backend=FakeBackend(50),
+            )
 
             artifact["data"][0]["M_new"] = "changed after preparation"
             atomic_write_json(paths.scenarios, artifact)
             backend = FakeBackend(50)
             with self.assertRaisesRegex(ValueError, "does not match"):
-                run_evaluation(root, resume=True, backend=backend)
+                run_evaluation(
+                    root,
+                    context_view="truncated",
+                    resume=True,
+                    show_progress=False,
+                    backend=backend,
+                )
             self.assertEqual(backend.calls, 0)
 
