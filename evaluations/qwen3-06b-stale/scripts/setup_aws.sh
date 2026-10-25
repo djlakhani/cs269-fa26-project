@@ -18,15 +18,27 @@ if ! command -v aws >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v uv >/dev/null 2>&1; then
+UV_BIN="$(command -v uv || true)"
+if [[ -z "${UV_BIN}" && -x "${HOME}/.local/bin/uv" ]]; then
+  UV_BIN="${HOME}/.local/bin/uv"
+fi
+if [[ -z "${UV_BIN}" ]]; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="${HOME}/.local/bin:${PATH}"
+  if [[ -x "${HOME}/.local/bin/uv" ]]; then
+    UV_BIN="${HOME}/.local/bin/uv"
+  else
+    UV_BIN="$(command -v uv || true)"
+  fi
+fi
+if [[ -z "${UV_BIN}" ]]; then
+  echo "uv installation completed, but the uv executable could not be located." >&2
+  exit 1
 fi
 
 cd "${PROJECT_DIR}"
-uv sync --locked
+"${UV_BIN}" sync --locked
 
-uv run --locked python - <<'PY'
+"${UV_BIN}" run --locked python - <<'PY'
 import torch
 from torch.nn.attention import SDPBackend, sdpa_kernel
 

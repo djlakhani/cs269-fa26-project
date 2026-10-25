@@ -39,6 +39,15 @@ fi
 mkdir -p "${ARTIFACT_ROOT}" "${CACHE_DIR}"
 cd "${PROJECT_DIR}"
 
+UV_BIN="$(command -v uv || true)"
+if [[ -z "${UV_BIN}" && -x "${HOME}/.local/bin/uv" ]]; then
+  UV_BIN="${HOME}/.local/bin/uv"
+fi
+if [[ -z "${UV_BIN}" ]]; then
+  echo "uv is unavailable. Run scripts/setup_aws.sh before starting an evaluation." >&2
+  exit 1
+fi
+
 aws s3api head-bucket --bucket "${S3_BUCKET}"
 # Resume cleanly on a replacement instance. An empty prefix is harmless.
 aws s3 sync "${S3_RUN_URI}" "${ARTIFACT_ROOT}" \
@@ -76,7 +85,7 @@ PREPARE_ARGS=(
 if [[ -n "${DESCRIPTION}" ]]; then
   PREPARE_ARGS+=(--description "${DESCRIPTION}")
 fi
-uv run --locked stale-qwen-eval prepare "${PREPARE_ARGS[@]}"
+"${UV_BIN}" run --locked stale-qwen-eval prepare "${PREPARE_ARGS[@]}"
 
 sync_artifacts
 
@@ -91,8 +100,8 @@ if [[ "${MODE}" == "smoke" ]]; then
   RUN_ARGS+=(--max-scenarios 1)
 fi
 
-uv run --locked stale-qwen-eval run "${RUN_ARGS[@]}"
-uv run --locked stale-qwen-eval report --artifact-root "${ARTIFACT_ROOT}" --view all
+"${UV_BIN}" run --locked stale-qwen-eval run "${RUN_ARGS[@]}"
+"${UV_BIN}" run --locked stale-qwen-eval report --artifact-root "${ARTIFACT_ROOT}" --view all
 sync_artifacts
 
 echo "Local artifacts: ${ARTIFACT_ROOT}"
