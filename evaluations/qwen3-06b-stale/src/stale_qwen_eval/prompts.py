@@ -17,10 +17,15 @@ IMPLICIT_SYSTEM_PROMPT = (
 )
 
 
-def format_haystack(sessions: Iterable[Mapping[str, Any]]) -> str:
-    """Serialize retained sessions while preserving their original session numbers."""
+def format_haystack(
+    sessions: Iterable[Mapping[str, Any]], *, preserve_input_order: bool = False
+) -> str:
+    """Serialize sessions with their original numbers and optional presentation order."""
     chunks: list[str] = []
-    for session in sorted(sessions, key=lambda value: int(value["original_index"])):
+    ordered_sessions = list(sessions)
+    if not preserve_input_order:
+        ordered_sessions.sort(key=lambda value: int(value["original_index"]))
+    for session in ordered_sessions:
         index = int(session["original_index"])
         timestamp = session.get("timestamp")
         time_text = f" [Time: {timestamp}]" if timestamp else ""
@@ -66,8 +71,10 @@ def count_prompt_tokens(
     sessions: Iterable[Mapping[str, Any]],
     query_text: str,
     dimension_key: str,
+    *,
+    preserve_input_order: bool = False,
 ) -> int:
-    history = format_haystack(sessions)
+    history = format_haystack(sessions, preserve_input_order=preserve_input_order)
     messages = build_messages(history, query_text, dimension_key)
     return len(chat_template_token_ids(tokenizer, messages))
 

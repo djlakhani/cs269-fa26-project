@@ -10,7 +10,9 @@ STALE probes independently under two context views:
   `relevant_session_index`.
 
 The resulting evaluation has 50 scenarios, 150 queries per view, and 300 model
-responses. Thinking is disabled, decoding is greedy, and scoring is manual.
+responses. Thinking is disabled, decoding is greedy, and scoring is manual. A
+second, derived experiment compares chronological and reversed presentation of
+only the two key user/assistant dialogue pairs.
 
 ## AWS deployment
 
@@ -59,6 +61,48 @@ bash scripts/run_aws.sh \
   full \
   "Qwen3-0.6B, 25 T1 + 25 T2, paired context comparison"
 ```
+
+### Key-dialogue order experiment
+
+This experiment reuses the exact frozen sample from the original run. For each
+scenario it locates the user turn containing `M_old` and the user turn
+containing `M_new`, then retains each turn and its immediate assistant reply:
+four messages total. It creates two views:
+
+- `key_pairs_chronological`: the `M_old` pair followed by the `M_new` pair.
+- `key_pairs_reversed`: the `M_new` pair followed by the `M_old` pair.
+
+The reversed view changes presentation order only. Original session numbers,
+timestamps, message text, and queries remain unchanged. The extraction requires
+at least 95% target-token coverage and a clear match margin; preparation fails
+instead of guessing if a scenario is ambiguous.
+
+Use the completed original run as the source and a different run ID for the
+derived experiment:
+
+```bash
+bash scripts/run_aws_key_pairs.sh \
+  qwen3-06b-stale-seed42-v1 \
+  qwen3-06b-stale-key-pairs-order-v1 \
+  smoke \
+  "Four-message M_old/M_new dialogue-pair order experiment"
+```
+
+The smoke run generates one complete scenario in each order condition (six
+responses total). Inspect those responses, then resume all remaining scenarios:
+
+```bash
+bash scripts/run_aws_key_pairs.sh \
+  qwen3-06b-stale-seed42-v1 \
+  qwen3-06b-stale-key-pairs-order-v1 \
+  full \
+  "Four-message M_old/M_new dialogue-pair order experiment"
+```
+
+The wrapper downloads only `scenarios.json` from the source run, creates a new
+derived artifact, checkpoints every response, and applies the same 60-second S3
+sync and resume behavior as the original evaluation. It never modifies the
+source run.
 
 Each view has a 50-scenario progress bar. The wrapper stores live artifacts on
 EBS under `/home/ubuntu/stale-artifacts/<run-id>` and synchronizes them to S3
@@ -115,7 +159,11 @@ bash scripts/run_aws.sh qwen3-06b-stale-seed42-v1 smoke "description"
 every scenario. Each view has independent checkpoints, reports, and manual
 scores. Existing manual annotations are preserved when reports are rebuilt.
 After both views are fully scored, the root comparison files report accuracy
-deltas and paired probe outcomes (improved, regressed, both pass, or both fail).
+deltas and paired outcomes (both pass, both fail, or only one view passes).
+The key-dialogue experiment uses the same layout, with view directories named
+`key_pairs_chronological` and `key_pairs_reversed`. Its derived
+`scenarios.json` records the selected turn indices, match coverage, presentation
+order, and unchanged timestamps for auditability.
 
 Once all labels are filled with `pass` or `fail`, summarize both views:
 

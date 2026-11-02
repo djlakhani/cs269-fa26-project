@@ -6,11 +6,12 @@ import re
 from collections import Counter
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from .constants import CONTEXT_VIEWS, DIMENSION_INFO, DIMENSION_KEYS, TYPE_INFO
 from .io_utils import atomic_write_json, atomic_write_text, load_json, utc_now
 from .persistence import ArtifactPaths, load_response_map
+from .prompts import format_haystack
 
 
 SCORE_FIELDS = [
@@ -107,6 +108,7 @@ def build_report(
     ]
     for scenario_number, scenario in enumerate(meta["data"], start=1):
         view = scenario["views"][context_view]
+        presentation = view.get("presentation_session_indices")
         lines.extend(
             [
                 f"## {scenario_number}. {scenario['type']} — {scenario['type_name']}",
@@ -114,9 +116,31 @@ def build_report(
                 f"UID: `{scenario['uid']}`  ",
                 f"Sessions retained: {len(view['kept_session_indices'])}/{scenario['source_session_count']}  ",
                 f"Evidence sessions: {', '.join(str(index + 1) for index in scenario['relevant_session_index'])}",
+                *(
+                    [
+                        f"Messages retained: {view.get('message_count', sum(len(session['messages']) for session in view['sessions']))}  ",
+                        "Presentation order: "
+                        + " → ".join(f"Session {index + 1}" for index in presentation),
+                    ]
+                    if presentation is not None
+                    else []
+                ),
                 "",
             ]
         )
+        if presentation is not None:
+            lines.extend(
+                [
+                    "**Presented key-dialogue context**",
+                    "",
+                    _fenced(
+                        format_haystack(
+                            view["sessions"], preserve_input_order=True
+                        )
+                    ),
+                    "",
+                ]
+            )
         for dimension_key in DIMENSION_KEYS:
             info = DIMENSION_INFO[dimension_key]
             record = responses.get((str(scenario["uid"]), dimension_key))
@@ -260,12 +284,20 @@ def summarize_context_comparison(
     artifact_root: Path,
     artifact: dict[str, Any],
     summaries: dict[str, dict[str, Any]],
+    *,
+    views: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Write paired accuracy deltas after both context views are fully scored."""
+    selected_views = list(views or summaries)
+    if len(selected_views) != 2:
+        raise ValueError("Context comparison requires exactly two views")
+    baseline_view, comparison_view = selected_views
     output: dict[str, Any] = {
         "generated_at": utc_now(),
         "complete": all(summary.get("complete") for summary in summaries.values()),
-        "views": list(CONTEXT_VIEWS),
+        "views": selected_views,
+        "baseline_view": baseline_view,
+        "comparison_view": comparison_view,
     }
     comparison_json = artifact_root / "comparison_summary.json"
     comparison_markdown = artifact_root / "comparison_summary.md"
@@ -280,42 +312,48 @@ def summarize_context_comparison(
         return output
 
     metrics: dict[str, dict[str, Any]] = {}
-    for group in summaries["truncated"]["metrics"]:
-        truncated = summaries["truncated"]["metrics"][group]
-        evidence = summaries["evidence_only"]["metrics"][group]
+    for group in summaries[baseline_view]["metrics"]:
+        baseline = summaries[baseline_view]["metrics"][group]
+        comparison = summaries[comparison_view]["metrics"][group]
         metrics[group] = {
-            "truncated_accuracy": truncated["accuracy"],
-            "evidence_only_accuracy": evidence["accuracy"],
-            "delta_evidence_only_minus_truncated": (
-                evidence["accuracy"] - truncated["accuracy"]
+            f"{baseline_view}_accuracy": baseline["accuracy"],
+            f"{comparison_view}_accuracy": comparison["accuracy"],
+            f"delta_{comparison_view}_minus_{baseline_view}": (
+                comparison["accuracy"] - baseline["accuracy"]
             ),
-            "total": truncated["total"],
+            "total": baseline["total"],
         }
 
     score_maps = {
         view: _load_existing_scores(ArtifactPaths(artifact_root, view).manual_scores)
-        for view in CONTEXT_VIEWS
+        for view in selected_views
     }
+    if (baseline_view, comparison_view) == ("truncated", "evidence_only"):
+        comparison_only_label = "improved_without_distractors"
+        baseline_only_label = "regressed_without_distractors"
+    else:
+        comparison_only_label = f"{comparison_view}_only_pass"
+        baseline_only_label = f"{baseline_view}_only_pass"
     paired_counts = Counter(
         {
             "both_pass": 0,
             "both_fail": 0,
-            "improved_without_distractors": 0,
-            "regressed_without_distractors": 0,
+            comparison_only_label: 0,
+            baseline_only_label: 0,
         }
     )
     for scenario in artifact["data"]:
         for dimension_key in DIMENSION_KEYS:
             key = (str(scenario["uid"]), dimension_key)
-            truncated_score = _normalized_score(score_maps["truncated"][key]["score"])
-            evidence_score = _normalized_score(score_maps["evidence_only"][key]["score"])
-            pair = (bool(truncated_score), bool(evidence_score))
+            baseline_score = _normalized_score(score_maps[baseline_view][key]["score"])
+            comparison_score = _normalized_score(score_maps[comparison_view][key]["score"])
+            pair = (bool(baseline_score), bool(comparison_score))
             paired_counts[
                 {
                     (True, True): "both_pass",
                     (False, False): "both_fail",
-                    (False, True): "improved_without_distractors",
-                    (True, False): "regressed_without_distractors",
+                    (False, True): comparison_only_label,
+                    (True, False): baseline_only_label,
                 }[pair]
             ] += 1
 
@@ -326,16 +364,16 @@ def summarize_context_comparison(
     lines = [
         "# Context-view comparison",
         "",
-        "Positive deltas mean evidence-only context scored higher.",
+        f"Positive deltas mean `{comparison_view}` scored higher than `{baseline_view}`.",
         "",
-        "| Group | Truncated | Evidence only | Delta (pp) | N |",
+        f"| Group | {baseline_view} | {comparison_view} | Delta (pp) | N |",
         "|---|---:|---:|---:|---:|",
     ]
     for group, metric in metrics.items():
         lines.append(
-            f"| {group} | {100 * metric['truncated_accuracy']:.1f}% | "
-            f"{100 * metric['evidence_only_accuracy']:.1f}% | "
-            f"{100 * metric['delta_evidence_only_minus_truncated']:+.1f} | "
+            f"| {group} | {100 * metric[f'{baseline_view}_accuracy']:.1f}% | "
+            f"{100 * metric[f'{comparison_view}_accuracy']:.1f}% | "
+            f"{100 * metric[f'delta_{comparison_view}_minus_{baseline_view}']:+.1f} | "
             f"{metric['total']} |"
         )
     lines.extend(["", "## Paired probe outcomes", ""])

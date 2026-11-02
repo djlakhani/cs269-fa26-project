@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stale-qwen-eval"
-version = "0.2.0"
-description = "Reproducible paired-context Qwen3-0.6B evaluation on STALE"
+version = "0.3.0"
+description = "Reproducible multi-context Qwen3-0.6B evaluation on STALE"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "datasets==4.4.1",

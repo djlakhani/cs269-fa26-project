@@ -32,7 +32,8 @@ from .reporting import load_artifact, refresh_report
 def expected_run_config(
     artifact: dict[str, Any], context_view: str, attention_backend: str
 ) -> dict[str, Any]:
-    return {
+    first_view = artifact["data"][0]["views"][context_view]
+    config = {
         "model": {"id": MODEL_ID, "revision": MODEL_REVISION},
         "prompt_version": PROMPT_VERSION,
         "context_view": context_view,
@@ -48,6 +49,10 @@ def expected_run_config(
         "enforced_sdpa_backend": attention_backend,
         "batch_size": 1,
     }
+    # Keep the original run-config shape unchanged for existing baseline runs.
+    if first_view.get("preserve_input_order", False):
+        config["history_serialization"] = "stored_presentation_order"
+    return config
 
 
 def validate_manifest_compatibility(
@@ -63,6 +68,10 @@ def validate_manifest_compatibility(
         raise ValueError("Prepared scenarios use an incompatible prompt version")
     if paths.view not in CONTEXT_VIEWS:
         raise ValueError(f"Unknown context view {paths.view!r}")
+    if paths.view not in artifact.get("context_views", {}):
+        raise ValueError(
+            f"Prepared scenarios do not define context view {paths.view!r}"
+        )
     for scenario in artifact.get("data", []):
         if paths.view not in scenario.get("views", {}):
             raise ValueError(
@@ -210,7 +219,10 @@ def run_evaluation(
             attempted_scenarios += 1
 
             view = scenario["views"][context_view]
-            history = format_haystack(view["sessions"])
+            history = format_haystack(
+                view["sessions"],
+                preserve_input_order=bool(view.get("preserve_input_order", False)),
+            )
             for dimension_key in missing_dimensions:
                 if max_queries is not None and generated_count >= max_queries:
                     break

@@ -123,3 +123,20 @@ class PromptAndTruncationTests(unittest.TestCase):
         )
         self.assertEqual(len(view["dropped_session_indices"]), 6)
 
+    def test_format_haystack_can_preserve_reversed_presentation_order(self) -> None:
+        sessions = [
+            {"original_index": 5, "timestamp": "new-time", "messages": []},
+            {"original_index": 2, "timestamp": "old-time", "messages": []},
+        ]
+        chronological = format_haystack(sessions)
+        reversed_presentation = format_haystack(
+            sessions, preserve_input_order=True
+        )
+        self.assertLess(chronological.index("Session 3"), chronological.index("Session 6"))
+        self.assertLess(
+            reversed_presentation.index("Session 6"),
+            reversed_presentation.index("Session 3"),
+        )
+        self.assertIn("Session 6 [Time: new-time]", reversed_presentation)
+        self.assertIn("Session 3 [Time: old-time]", reversed_presentation)
+

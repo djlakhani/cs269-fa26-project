@@ -14,10 +14,11 @@ from .constants import (
     DEFAULT_SAMPLES_PER_TYPE,
     DEFAULT_SEED,
 )
+from .io_utils import load_json
+from .key_pairs import prepare_key_pair_views
 from .persistence import ArtifactPaths, rebuild_responses_jsonl
 from .preparation import prepare_from_huggingface
 from .reporting import (
-    load_artifact,
     refresh_report,
     summarize_context_comparison,
     summarize_manual_scores,
@@ -29,8 +30,17 @@ def _path(value: str) -> Path:
     return Path(value).expanduser().resolve()
 
 
-def _selected_views(value: str) -> list[str]:
-    return list(CONTEXT_VIEWS) if value == "all" else [value]
+def _selected_views(value: str, artifact: dict) -> list[str]:
+    available = list(artifact.get("context_views", {}))
+    if not available:
+        raise ValueError("Prepared scenarios do not declare any context views")
+    selected = available if value == "all" else [value]
+    missing = [view for view in selected if view not in available]
+    if missing:
+        raise ValueError(
+            f"Requested context view(s) {missing}, but artifact contains {available}"
+        )
+    return selected
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +60,18 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--run-id")
     prepare.add_argument("--description")
     prepare.add_argument("--force", action="store_true")
+
+    prepare_key_pairs = subparsers.add_parser(
+        "prepare-key-pairs",
+        help="Derive chronological and reversed M_old/M_new dialogue-pair views",
+    )
+    prepare_key_pairs.add_argument("--source-scenarios", type=_path, required=True)
+    prepare_key_pairs.add_argument("--artifact-root", type=_path, required=True)
+    prepare_key_pairs.add_argument("--cache-dir", type=_path)
+    prepare_key_pairs.add_argument("--run-id")
+    prepare_key_pairs.add_argument("--description")
+    prepare_key_pairs.add_argument("--source-reference")
+    prepare_key_pairs.add_argument("--force", action="store_true")
 
     run = subparsers.add_parser("run", help="Generate responses for prepared scenarios")
     run.add_argument("--artifact-root", type=_path, required=True)
@@ -91,8 +113,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Prepared scenarios: {path}")
         return 0
 
-    views = _selected_views(args.view)
-    artifact = load_artifact(ArtifactPaths(args.artifact_root, views[0]))
+    if args.command == "prepare-key-pairs":
+        path = prepare_key_pair_views(
+            args.source_scenarios,
+            args.artifact_root,
+            cache_dir=args.cache_dir,
+            force=args.force,
+            run_id=args.run_id,
+            description=args.description,
+            source_reference=args.source_reference,
+        )
+        print(f"Prepared key-pair scenarios: {path}")
+        return 0
+
+    scenario_path = args.artifact_root / "scenarios.json"
+    if not scenario_path.exists():
+        raise FileNotFoundError(f"Missing prepared scenarios: {scenario_path}")
+    artifact = load_json(scenario_path)
+    views = _selected_views(args.view, artifact)
     if args.command == "run":
         counts = run_context_views(
             args.artifact_root,
@@ -117,9 +155,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             view: summarize_manual_scores(ArtifactPaths(args.artifact_root, view), artifact)
             for view in views
         }
-        if set(views) == set(CONTEXT_VIEWS):
+        if len(views) == 2 and set(views) == set(artifact["context_views"]):
             summaries["comparison"] = summarize_context_comparison(
-                args.artifact_root, artifact, summaries
+                args.artifact_root, artifact, summaries, views=views
             )
         print(json.dumps(summaries, ensure_ascii=False, indent=2))
         return 0 if all(summary["complete"] for summary in summaries.values()) else 2

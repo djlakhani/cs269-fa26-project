@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-PACKAGE_VERSION = "0.2.0"
+PACKAGE_VERSION = "0.3.0"
 SCENARIO_SCHEMA_VERSION = 2
 RESPONSE_SCHEMA_VERSION = 2
 MANIFEST_SCHEMA_VERSION = 2
@@ -17,11 +17,21 @@ DEFAULT_CONTEXT_WINDOW = 32_768
 DEFAULT_MAX_NEW_TOKENS = 512
 DEFAULT_INPUT_TOKEN_LIMIT = DEFAULT_CONTEXT_WINDOW - DEFAULT_MAX_NEW_TOKENS
 
-DEFAULT_CONTEXT_VIEW = "truncated"
-CONTEXT_VIEWS = {
+BASE_CONTEXT_VIEWS = {
     "truncated": "Truncated history with retained distractor sessions",
     "evidence_only": "Only the two relevant evidence sessions",
 }
+KEY_PAIR_CONTEXT_VIEWS = {
+    "key_pairs_chronological": (
+        "Only the M_old and M_new user/assistant pairs, shown old then new"
+    ),
+    "key_pairs_reversed": (
+        "Only the M_old and M_new user/assistant pairs, shown new then old "
+        "with original timestamps unchanged"
+    ),
+}
+CONTEXT_VIEWS = {**BASE_CONTEXT_VIEWS, **KEY_PAIR_CONTEXT_VIEWS}
+DEFAULT_CONTEXT_VIEW = "truncated"
 
 DEFAULT_ATTENTION_BACKEND = "flash_sdpa"
 ATTENTION_BACKENDS = ("flash_sdpa", "sdpa")

@@ -55,6 +55,10 @@ def make_artifact() -> dict[str, Any]:
         "dataset": {"id": DATASET_ID, "revision": DATASET_REVISION, "split": "train"},
         "model_tokenizer": {"id": MODEL_ID, "revision": MODEL_REVISION},
         "prompt_version": PROMPT_VERSION,
+        "context_views": {
+            "truncated": "test truncated",
+            "evidence_only": "test evidence only",
+        },
         "sampling": {"seed": 42, "samples_per_type": 1, "total_scenarios": 1},
         "token_budget": {
             "context_window": 100,

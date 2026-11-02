@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .constants import (
-    CONTEXT_VIEWS,
+    BASE_CONTEXT_VIEWS,
     DATASET_ID,
     DATASET_REVISION,
     DEFAULT_CONTEXT_WINDOW,
@@ -101,7 +101,7 @@ def build_scenario_artifact(
         "dataset": {"id": DATASET_ID, "revision": DATASET_REVISION, "split": "train"},
         "model_tokenizer": {"id": MODEL_ID, "revision": MODEL_REVISION},
         "prompt_version": PROMPT_VERSION,
-        "context_views": dict(CONTEXT_VIEWS),
+        "context_views": dict(BASE_CONTEXT_VIEWS),
         "sampling": {
             "seed": seed,
             "samples_per_type": samples_per_type,
