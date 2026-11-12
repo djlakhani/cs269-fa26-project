@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+import json
+import unittest
+from datetime import datetime, timezone
+
+from stale_qwen_eval.prompts import (
+    EXPLICIT_SYSTEM_PROMPT,
+    IMPLICIT_SYSTEM_PROMPT,
+    build_messages,
+    count_prompt_tokens,
+    format_haystack,
+)
+from stale_qwen_eval.truncation import (
+    EvidenceTooLongError,
+    evidence_only_view,
+    truncate_scenario,
+)
+
+from conftest import FakeTokenizer, make_record
+
+
+class PromptAndTruncationTests(unittest.TestCase):
+    def test_author_prompt_shapes_and_thinking_disabled(self) -> None:
+        explicit = build_messages("history", "question", "dim1_query")
+        implicit = build_messages("history", "request", "dim3_query")
+        self.assertEqual(explicit[0]["content"], EXPLICIT_SYSTEM_PROMPT)
+        self.assertIn("[Question]\nquestion", explicit[1]["content"])
+        self.assertEqual(implicit[0]["content"], IMPLICIT_SYSTEM_PROMPT)
+        self.assertIn("[Latest Query]\nrequest", implicit[1]["content"])
+
+        tokenizer = FakeTokenizer()
+        count_prompt_tokens(
+            tokenizer,
+            [{"original_index": 0, "timestamp": None, "messages": []}],
+            "question",
+            "dim1_query",
+        )
+        self.assertEqual(tokenizer.enable_thinking_values, [False])
+
+    def test_truncation_preserves_evidence_order_timestamps_and_budget(self) -> None:
+        tokenizer = FakeTokenizer()
+        record = make_record("scenario-a", "T1")
+        full_sessions = [
+            {
+                "original_index": index,
+                "timestamp": record["timestamps"][index],
+                "messages": session,
+            }
+            for index, session in enumerate(record["haystack_session"])
+        ]
+        full_max = max(
+            count_prompt_tokens(tokenizer, full_sessions, query, dimension)
+            for dimension, query in record["probing_queries"].items()
+        )
+
+        prepared = truncate_scenario(
+            record,
+            tokenizer,
+            input_token_limit=full_max - 200,
+            seed=42,
+        )
+
+        self.assertTrue(
+            set(record["relevant_session_index"]).issubset(prepared["kept_session_indices"])
+        )
+        self.assertEqual(
+            prepared["kept_session_indices"], sorted(prepared["kept_session_indices"])
+        )
+        self.assertTrue(prepared["dropped_session_indices"])
+        self.assertLessEqual(max(prepared["input_token_counts"].values()), full_max - 200)
+        for session in prepared["sessions"]:
+            index = session["original_index"]
+            self.assertEqual(session["timestamp"], record["timestamps"][index])
+            self.assertEqual(session["messages"], record["haystack_session"][index])
+
+        formatted = format_haystack(prepared["sessions"])
+        self.assertIn("=== Session 3 [Time:", formatted)
+        self.assertIn("=== Session 6 [Time:", formatted)
+
+    def test_truncation_is_deterministic(self) -> None:
+        record = make_record("scenario-b", "T2")
+        first = truncate_scenario(record, FakeTokenizer(), input_token_limit=850, seed=42)
+        second = truncate_scenario(record, FakeTokenizer(), input_token_limit=850, seed=42)
+        self.assertEqual(first["kept_session_indices"], second["kept_session_indices"])
+        self.assertEqual(
+            first["distractor_removal_order"], second["distractor_removal_order"]
+        )
+
+    def test_datetime_timestamps_are_normalized_for_json(self) -> None:
+        record = make_record("scenario-datetime", "T1")
+        record["timestamps"] = [
+            datetime(2025, 1, index + 1, 12, 0, tzinfo=timezone.utc)
+            for index in range(len(record["haystack_session"]))
+        ]
+        prepared = truncate_scenario(
+            record,
+            FakeTokenizer(),
+            input_token_limit=10_000,
+            seed=42,
+        )
+        self.assertEqual(
+            prepared["sessions"][0]["timestamp"],
+            "2025-01-01T12:00:00+00:00",
+        )
+        json.dumps(prepared)
+
+    def test_mandatory_evidence_overflow_fails(self) -> None:
+        with self.assertRaisesRegex(EvidenceTooLongError, "mandatory evidence"):
+            truncate_scenario(
+                make_record("scenario-c", "T1"),
+                FakeTokenizer(),
+                input_token_limit=10,
+                seed=42,
+            )
+
+    def test_evidence_only_contains_exactly_the_two_relevant_sessions(self) -> None:
+        record = make_record("scenario-evidence", "T2")
+        view = evidence_only_view(record, FakeTokenizer(), input_token_limit=10_000)
+        self.assertEqual(view["kept_session_indices"], [2, 5])
+        self.assertEqual(
+            [session["original_index"] for session in view["sessions"]], [2, 5]
+        )
+        self.assertEqual(len(view["dropped_session_indices"]), 6)
+
+    def test_format_haystack_can_preserve_reversed_presentation_order(self) -> None:
+        sessions = [
+            {"original_index": 5, "timestamp": "new-time", "messages": []},
+            {"original_index": 2, "timestamp": "old-time", "messages": []},
+        ]
+        chronological = format_haystack(sessions)
+        reversed_presentation = format_haystack(
+            sessions, preserve_input_order=True
+        )
+        self.assertLess(chronological.index("Session 3"), chronological.index("Session 6"))
+        self.assertLess(
+            reversed_presentation.index("Session 6"),
+            reversed_presentation.index("Session 3"),
+        )
+        self.assertIn("Session 6 [Time: new-time]", reversed_presentation)
+        self.assertIn("Session 3 [Time: old-time]", reversed_presentation)
+
