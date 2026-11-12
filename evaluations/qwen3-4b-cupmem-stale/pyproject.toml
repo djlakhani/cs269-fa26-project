@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cupmem-stale-eval"
+version = "0.1.0"
+description = "Auditable Qwen3-4B CUP-Mem evaluation on STALE"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "datasets==4.4.1",
+  "huggingface-hub==0.36.2",
+  "httpx>=0.24.0",
+  "openai>=1.0.0",
+  "torch==2.8.0; sys_platform == 'linux'",
+  "tqdm==4.67.1",
+  "transformers==4.57.3",
+  "vllm==0.11.0; sys_platform == 'linux'",
+  "zstandard==0.25.0",
+]
+
+[project.scripts]
+cupmem-stale-eval = "cupmem_stale_eval.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
