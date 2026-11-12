@@ -49,6 +49,9 @@ Artifacts are restored from and synchronized every 60 seconds to:
 s3://stale-qwen-evals-589498925064-us-east-1-an/cup-mem/runs/<run-id>/
 ```
 
+The S3 preflight is write/read-only. It retains a small
+`preflight-<run-id>.txt` sentinel and never requires `s3:DeleteObject`.
+
 Optional environment overrides:
 
 ```bash

@@ -64,7 +64,6 @@ printf 'cupmem-s3-preflight\n' >"${PREFLIGHT_FILE}"
 PREFLIGHT_KEY="${S3_RUN_URI%/}/preflight-${RUN_ID}.txt"
 aws s3 cp "${PREFLIGHT_FILE}" "${PREFLIGHT_KEY}" --only-show-errors
 aws s3api head-object --bucket "${BUCKET}" --key "${PREFLIGHT_KEY#s3://${BUCKET}/}" >/dev/null
-aws s3 rm "${PREFLIGHT_KEY}" --only-show-errors
 rm -f "${PREFLIGHT_FILE}"
 
 sync_artifacts() {

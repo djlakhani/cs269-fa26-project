@@ -211,6 +211,7 @@ Target Model Response 3: three
         subprocess.run(["bash", "-n", str(setup_script)], check=True)
         text = run_script.read_text(encoding="utf-8")
         self.assertNotIn("--delete", text)
+        self.assertNotIn("aws s3 rm", text)
         self.assertIn("--dryrun", text)
         self.assertIn("sleep \"${SYNC_INTERVAL}\"", text)
         invalid = subprocess.run(
