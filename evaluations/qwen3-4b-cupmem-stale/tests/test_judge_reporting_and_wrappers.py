@@ -214,6 +214,8 @@ Target Model Response 3: three
         self.assertNotIn("aws s3 rm", text)
         self.assertIn("--dryrun", text)
         self.assertIn("sleep \"${SYNC_INTERVAL}\"", text)
+        self.assertIn('RUN_ARGS+=(--max-per-type 7)', text)
+        self.assertIn('"${MODE}" == "subset"', text)
         invalid = subprocess.run(
             ["bash", str(run_script), "../bad", "smoke"],
             capture_output=True,

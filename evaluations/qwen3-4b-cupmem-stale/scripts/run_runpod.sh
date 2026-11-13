@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  echo "Usage: $0 RUN_ID [smoke|full]" >&2
+  echo "Usage: $0 RUN_ID [smoke|subset|full]" >&2
   exit 2
 fi
 RUN_ID="$1"
@@ -11,8 +11,8 @@ if [[ ! "${RUN_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
   echo "Run ID contains an invalid character" >&2
   exit 2
 fi
-if [[ "${MODE}" != "smoke" && "${MODE}" != "full" ]]; then
-  echo "Mode must be smoke or full" >&2
+if [[ "${MODE}" != "smoke" && "${MODE}" != "subset" && "${MODE}" != "full" ]]; then
+  echo "Mode must be smoke, subset, or full" >&2
   exit 2
 fi
 
@@ -149,6 +149,8 @@ JUDGE_ARGS=(--artifact-root "${ARTIFACT_ROOT}" --model gpt-6-luna --resume)
 if [[ "${MODE}" == "smoke" ]]; then
   RUN_ARGS+=(--max-per-type 1)
   JUDGE_ARGS+=(--max-scenarios 2)
+elif [[ "${MODE}" == "subset" ]]; then
+  RUN_ARGS+=(--max-per-type 7)
 fi
 
 "${UV_BIN}" run --locked cupmem-stale-eval run "${RUN_ARGS[@]}"
@@ -156,7 +158,7 @@ fi
 "${UV_BIN}" run --locked cupmem-stale-eval diagnose \
   --artifact-root "${ARTIFACT_ROOT}" --model gpt-6-luna --resume
 "${UV_BIN}" run --locked cupmem-stale-eval report --artifact-root "${ARTIFACT_ROOT}"
-if [[ "${MODE}" == "smoke" ]]; then
+if [[ "${MODE}" == "smoke" || "${MODE}" == "subset" ]]; then
   "${UV_BIN}" run --locked cupmem-stale-eval verify \
     --artifact-root "${ARTIFACT_ROOT}" --allow-incomplete
 else

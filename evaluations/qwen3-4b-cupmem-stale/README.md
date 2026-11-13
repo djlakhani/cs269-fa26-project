@@ -40,6 +40,16 @@ bash scripts/run_runpod.sh qwen3-4b-cupmem-stale-seed42-v1 smoke
 Inspect the artifacts, then resume all remaining scenarios with the same ID:
 
 ```bash
+bash scripts/run_runpod.sh qwen3-4b-cupmem-stale-seed42-v1 subset
+```
+
+`subset` runs seven T1 and seven T2 scenarios, including any scenarios already
+completed by smoke mode. It produces 42 answers and uses incomplete-run
+verification because the frozen artifact still contains the full 50+50 sample.
+
+To resume all 50 T1 and 50 T2 scenarios instead, use:
+
+```bash
 bash scripts/run_runpod.sh qwen3-4b-cupmem-stale-seed42-v1 full
 ```
 
